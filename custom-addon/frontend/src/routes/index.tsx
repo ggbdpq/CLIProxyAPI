@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate } from '@tanstack/react-router'
+import { createFileRoute } from '@tanstack/react-router'
 import { useRef, useState } from 'react'
 
 import { StatsCards } from '@/components/records/stats-cards'
@@ -41,7 +41,6 @@ import { detectTargetsFrom, useDetection, useFilters } from '@/store/app'
 const ALL = '__all__'
 
 function DataRecordsPage() {
-  const navigate = useNavigate()
   const filters = useFilters()
   const detection = useDetection()
   const fileInput = useRef<HTMLInputElement>(null)
@@ -160,9 +159,6 @@ function DataRecordsPage() {
           <h1 className="text-[28px] font-extrabold tracking-tight">数据记录</h1>
           <p className="text-muted-foreground mt-1 text-sm">导入 JSONL 到本地 SQLite，集中管理与检测账号数据。</p>
         </div>
-        <Button type="button" variant="outline" onClick={() => navigate({ to: '/batches' })}>
-          批次台账
-        </Button>
       </div>
 
       <div className="rounded-2xl border p-5 shadow-sm">
