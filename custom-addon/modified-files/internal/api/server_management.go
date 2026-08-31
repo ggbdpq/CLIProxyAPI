@@ -22,6 +22,9 @@ func (s *Server) registerManagementRoutes() {
 
 	log.Info("management routes registered after secret key configuration")
 
+	// 数据管理 SPA：/data-mgmt/ 子路径静态资源服务（custom-addon/frontend/dist）
+	s.registerDataMgmtSPA()
+
 	s.engine.POST("/v0/management/oauth-callback", s.managementAvailabilityMiddleware(), s.mgmt.PostOAuthCallback)
 	s.engine.GET("/v0/management/oauth-callback", s.managementAvailabilityMiddleware(), s.mgmt.GetOAuthCallback)
 
@@ -326,20 +329,7 @@ func (s *Server) serveManagementControlPanel(c *gin.Context) {
 		}
 	}
 
-	data, errRead := os.ReadFile(filePath)
-	if errRead != nil {
-		log.WithError(errRead).Error("failed to read management control panel asset")
-		c.AbortWithStatus(http.StatusInternalServerError)
-		return
-	}
-
-	if managementasset.UsePluginInjectedUI() {
-		// 插件注入模式：返回官方原始管理面板，前端「数据管理」UI 由 Chrome 插件注入。
-		c.File(filePath)
-	} else {
-		// 默认 Go 注入模式：将数据管理扩展拼接到官方面板后返回。
-		c.Data(http.StatusOK, "text/html; charset=utf-8", managementasset.InjectDataManagementExtension(data))
-	}
+	c.File(filePath)
 }
 
 func (s *Server) dataRecordsStore() *datarecords.Store {
