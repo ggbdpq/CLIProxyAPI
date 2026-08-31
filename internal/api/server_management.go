@@ -22,6 +22,9 @@ func (s *Server) registerManagementRoutes() {
 
 	log.Info("management routes registered after secret key configuration")
 
+	// 数据管理 SPA：/data-mgmt/ 子路径静态资源服务（custom-addon/frontend/dist）
+	s.registerDataMgmtSPA()
+
 	s.engine.POST("/v0/management/oauth-callback", s.managementAvailabilityMiddleware(), s.mgmt.PostOAuthCallback)
 	s.engine.GET("/v0/management/oauth-callback", s.managementAvailabilityMiddleware(), s.mgmt.GetOAuthCallback)
 
