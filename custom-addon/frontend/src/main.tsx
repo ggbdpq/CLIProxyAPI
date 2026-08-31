@@ -16,7 +16,9 @@ const queryClient = new QueryClient({
   },
 })
 
-const router = createRouter({ routeTree, context: { queryClient } })
+// SPA 挂载在 /data-mgmt/ 子路径（与 vite.config 的 base 一致），
+// router 必须声明同一 basepath，否则浏览器 URL 匹配不到路由表渲染 "Not Found"。
+const router = createRouter({ routeTree, context: { queryClient }, basepath: '/data-mgmt' })
 
 declare module '@tanstack/react-router' {
   interface Register {
