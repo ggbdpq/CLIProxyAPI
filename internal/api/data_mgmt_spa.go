@@ -2,8 +2,7 @@ package api
 
 // 数据管理 SPA 静态资源服务：以 /data-mgmt/ 子路径 serve custom-addon/frontend/dist
 // 构建产物，未命中文件时回退 index.html（SPA 客户端路由需要）。
-// dist 定位与 data_management_extension.html 同款查找模式：
-// 环境变量 CPA_DATA_MGMT_DIST 覆盖 → 配置目录 / 工作目录 / exe 目录向上逐级查找。
+// dist 定位：环境变量 CPA_DATA_MGMT_DIST 覆盖 → 配置目录 / 工作目录 / exe 目录向上逐级查找。
 
 import (
 	"net/http"

@@ -1,7 +1,6 @@
 package managementasset
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -27,16 +26,13 @@ import (
 )
 
 const (
-	defaultManagementReleaseURL    = "https://api.github.com/repos/router-for-me/Cli-Proxy-API-Management-Center/releases/latest"
-	defaultManagementFallbackURL   = "https://cpamc.router-for.me/"
-	managementAssetName            = "management.html"
-	httpUserAgent                  = "CLIProxyAPI-management-updater"
-	managementSyncMinInterval      = 30 * time.Second
-	updateCheckInterval            = 3 * time.Hour
-	maxAssetDownloadSize           = 50 << 20 // 10 MB safety limit for management asset downloads
-	dataManagementExtensionRelPath = "custom-addon/frontend/data_management_extension.html"
-	pluginUIEnvName                = "CPA_PLUGIN_UI"
-	dataManagementHTMLEnvName      = "CPA_DATA_MGMT_HTML"
+	defaultManagementReleaseURL  = "https://api.github.com/repos/router-for-me/Cli-Proxy-API-Management-Center/releases/latest"
+	defaultManagementFallbackURL = "https://cpamc.router-for.me/"
+	managementAssetName          = "management.html"
+	httpUserAgent                = "CLIProxyAPI-management-updater"
+	managementSyncMinInterval    = 30 * time.Second
+	updateCheckInterval          = 3 * time.Hour
+	maxAssetDownloadSize         = 50 << 20 // 10 MB safety limit for management asset downloads
 )
 
 // ManagementFileName exposes the control panel asset filename.
@@ -188,90 +184,6 @@ func FilePath(configFilePath string) string {
 		return ""
 	}
 	return filepath.Join(dir, ManagementFileName)
-}
-
-// UsePluginInjectedUI reports whether the official panel should skip Go HTML injection.
-// Set CPA_PLUGIN_UI=1 when launching the 8317 Chrome-extension mode.
-func UsePluginInjectedUI() bool {
-	value := strings.TrimSpace(os.Getenv(pluginUIEnvName))
-	return value == "1" || strings.EqualFold(value, "true")
-}
-
-// InjectDataManagementExtension adds the local data management panel extension to management.html.
-func InjectDataManagementExtension(data []byte) []byte {
-	extension := loadDataManagementExtension()
-	if len(data) == 0 || len(extension) == 0 {
-		return data
-	}
-	if bytes.Contains(data, []byte("cpa-data-management-extension")) {
-		return data
-	}
-	bodyClose := []byte("</body>")
-	idx := bytes.LastIndex(data, bodyClose)
-	if idx < 0 {
-		return data
-	}
-	out := make([]byte, 0, len(data)+len(extension))
-	out = append(out, data[:idx]...)
-	out = append(out, extension...)
-	out = append(out, data[idx:]...)
-	return out
-}
-
-func loadDataManagementExtension() []byte {
-	path := dataManagementExtensionPath()
-	if path == "" {
-		return nil
-	}
-	data, errRead := os.ReadFile(path)
-	if errRead != nil {
-		log.WithError(errRead).Debug("data management extension html not loaded")
-		return nil
-	}
-	return data
-}
-
-func dataManagementExtensionPath() string {
-	if override := strings.TrimSpace(os.Getenv(dataManagementHTMLEnvName)); override != "" {
-		return override
-	}
-	roots := make([]string, 0, 3)
-	if raw := schedulerConfigPath.Load(); raw != nil {
-		if configPath, ok := raw.(string); ok && strings.TrimSpace(configPath) != "" {
-			roots = append(roots, filepath.Dir(configPath))
-		}
-	}
-	if cwd, errCwd := os.Getwd(); errCwd == nil {
-		roots = append(roots, cwd)
-	}
-	if exe, errExe := os.Executable(); errExe == nil {
-		roots = append(roots, filepath.Dir(exe))
-	}
-	seen := make(map[string]struct{}, 16)
-	for _, root := range roots {
-		dir := root
-		for range 10 {
-			abs, errAbs := filepath.Abs(dir)
-			if errAbs != nil {
-				break
-			}
-			if _, dup := seen[abs]; dup {
-				break
-			}
-			seen[abs] = struct{}{}
-			candidate := filepath.Join(abs, filepath.FromSlash(dataManagementExtensionRelPath))
-			info, errStat := os.Stat(candidate)
-			if errStat == nil && !info.IsDir() {
-				return candidate
-			}
-			parent := filepath.Dir(abs)
-			if parent == abs {
-				break
-			}
-			dir = parent
-		}
-	}
-	return ""
 }
 
 // EnsureLatestManagementHTML checks the latest management.html asset and updates the local copy when needed.
