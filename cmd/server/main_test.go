@@ -153,14 +153,14 @@ func TestHomeConfigPayloadPortApplication(t *testing.T) {
 			wantPort: 8327,
 		},
 		{
-			name:     "missing port defaults to 8317",
+			name:     "missing port defaults to 8318",
 			yamlBody: "debug: true\n",
-			wantPort: 8317,
+			wantPort: 8318,
 		},
 		{
-			name:     "standard port 8317 preserved",
-			yamlBody: "port: 8317\n",
-			wantPort: 8317,
+			name:     "standard port 8318 preserved",
+			yamlBody: "port: 8318\n",
+			wantPort: 8318,
 		},
 	}
 

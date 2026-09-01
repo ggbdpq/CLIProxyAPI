@@ -94,6 +94,11 @@ func (s *Server) registerManagementRoutes() {
 		mgmt.DELETE("/data-records", func(c *gin.Context) { s.dataRecordsStore().DeleteDataRecords(c) })
 		mgmt.GET("/data-records/export", func(c *gin.Context) { s.dataRecordsStore().ExportDataRecords(c) })
 		mgmt.POST("/data-records/generate-quota", func(c *gin.Context) { s.dataRecordsStore().GenerateQuotaFiles(c) })
+		mgmt.POST("/data-records/deploy", func(c *gin.Context) { s.dataRecordsStore().DeployDataRecords(c) })
+		mgmt.POST("/data-records/recycle", func(c *gin.Context) { s.dataRecordsStore().RecycleDataRecords(c) })
+		mgmt.POST("/data-records/refresh-token", func(c *gin.Context) { s.dataRecordsStore().RefreshDataRecordToken(c) })
+		mgmt.POST("/data-records/convert", func(c *gin.Context) { s.dataRecordsStore().ConvertDataRecords(c) })
+		mgmt.POST("/data-records/register-reauth", func(c *gin.Context) { s.dataRecordsStore().RegisterDataRecordReauth(c) })
 		mgmt.POST("/data-records/import", func(c *gin.Context) { s.dataRecordsStore().ImportDataRecords(c) })
 
 		mgmt.GET("/gemini-api-key", s.mgmt.GetGeminiKeys)
@@ -334,12 +339,16 @@ func (s *Server) serveManagementControlPanel(c *gin.Context) {
 
 func (s *Server) dataRecordsStore() *datarecords.Store {
 	authDir := ""
+	proxyURL := ""
 	if s != nil && s.cfg != nil {
 		authDir = s.cfg.AuthDir
+		proxyURL = s.cfg.ProxyURL
 	}
 	path := ""
 	if s != nil {
 		path = s.configFilePath
 	}
-	return datarecords.New(path, authDir)
+	store := datarecords.New(path, authDir)
+	store.ProxyURL = proxyURL
+	return store
 }

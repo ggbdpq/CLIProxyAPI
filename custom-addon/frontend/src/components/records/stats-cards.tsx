@@ -20,6 +20,7 @@ export function StatsCards() {
     { filter: 'lifecycle:in_use', num: lifecycle.in_use ?? 0, label: '使用中' },
     { filter: 'lifecycle:sold', num: lifecycle.sold ?? 0, label: '已售出' },
     { filter: 'health:abnormal', num: abnormal, label: '异常' },
+    { filter: 'detected', num: stats?.detected ?? 0, label: '已检测' },
   ]
 
   function active(filter: string): boolean {
@@ -27,7 +28,8 @@ export function StatsCards() {
     if (filter === 'lifecycle:in_use') return filters.lifecycle === 'in_use'
     if (filter === 'lifecycle:sold') return filters.lifecycle === 'sold'
     if (filter === 'health:abnormal') return filters.health === 'abnormal'
-    return filters.lifecycle === '' && filters.health === '' && filters.authState === '' && filters.batch === ''
+    if (filter === 'detected') return filters.detected
+    return filters.lifecycle === '' && filters.health === '' && filters.authState === '' && filters.batch === '' && !filters.detected
   }
 
   function apply(filter: string) {
@@ -35,14 +37,21 @@ export function StatsCards() {
       const value = filter.split(':')[1]
       filters.setLifecycle(filters.lifecycle === value ? '' : value)
       filters.setHealth('')
+      filters.setDetected(false)
     } else if (filter === 'health:abnormal') {
       filters.setHealth(filters.health === 'abnormal' ? '' : 'abnormal')
       filters.setLifecycle('')
+      filters.setDetected(false)
+    } else if (filter === 'detected') {
+      filters.setDetected(!filters.detected)
+      filters.setLifecycle('')
+      filters.setHealth('')
     } else {
       filters.setLifecycle('')
       filters.setHealth('')
       filters.setAuthState('')
       filters.setBatch('')
+      filters.setDetected(false)
     }
   }
 

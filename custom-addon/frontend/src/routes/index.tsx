@@ -1,4 +1,4 @@
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, Link } from '@tanstack/react-router'
 import { useRef, useState } from 'react'
 
 import { StatsCards } from '@/components/records/stats-cards'
@@ -25,27 +25,45 @@ import {
   exportRecordsJSONL,
   useBatchesQuery,
   useDeleteRecordsMutation,
+  useDeployRecordsMutation,
   useGenerateQuotaMutation,
   useImportMutation,
+  useRecycleRecordsMutation,
   useRecordsQuery,
+  useRefreshTokenMutation,
   useUpdateStateMutation,
 } from '@/lib/queries'
 import {
   HEALTH_LABELS,
   LIFECYCLE_LABELS,
+  recordEmail,
+  recordRefreshToken,
   type GenerateQuotaResult,
 } from '@/lib/schemas'
 import { useStatsQuery } from '@/lib/queries'
 import { detectTargetsFrom, useDetection, useFilters } from '@/store/app'
 
 const ALL = '__all__'
+const DEPLOY_TARGET_LABELS: Record<string, string> = {
+  local: '本仓库',
+  official: '官方 auth 目录',
+}
+
+type FileActionResult = {
+  title: string
+  description: string
+  files: string[]
+}
 
 function DataRecordsPage() {
   const filters = useFilters()
   const detection = useDetection()
   const fileInput = useRef<HTMLInputElement>(null)
   const [lifecycleValue, setLifecycleValue] = useState('unused')
+  const [deployTarget, setDeployTarget] = useState('local')
   const [quotaResult, setQuotaResult] = useState<GenerateQuotaResult | null>(null)
+  const [fileActionResult, setFileActionResult] = useState<FileActionResult | null>(null)
+  const [refreshing, setRefreshing] = useState(false)
   const [feedback, setFeedback] = useState<{ error?: string; message?: string }>({})
 
   const recordsQuery = useRecordsQuery()
@@ -53,6 +71,9 @@ function DataRecordsPage() {
   const deleteMutation = useDeleteRecordsMutation()
   const updateStateMutation = useUpdateStateMutation()
   const generateQuotaMutation = useGenerateQuotaMutation()
+  const deployMutation = useDeployRecordsMutation()
+  const recycleMutation = useRecycleRecordsMutation()
+  const refreshTokenMutation = useRefreshTokenMutation()
   const importMutation = useImportMutation()
 
   const records = recordsQuery.data?.records ?? []
@@ -102,12 +123,64 @@ function DataRecordsPage() {
   }
 
   function onGenerateQuota() {
-    if (!selectedIds.length) return setFeedback({ error: '请选择要生成配额的数据' })
+    if (!selectedIds.length) return setFeedback({ error: '请选择要兼容生成的数据' })
     run(async () => {
       const result = await generateQuotaMutation.mutateAsync(selectedIds)
-      setFeedback({ message: `已生成 ${result.exported} 条配额文件` })
+      setFeedback({ message: `已兼容生成 ${result.exported} 条本仓库凭证文件` })
       setQuotaResult(result)
-    }, '正在生成配额文件...')
+    }, '正在兼容生成本仓库凭证文件...')
+  }
+
+  function onDeploy() {
+    if (!selectedIds.length) return setFeedback({ error: '请选择要部署的数据' })
+    run(async () => {
+      const result = await deployMutation.mutateAsync({ ids: selectedIds, target: deployTarget })
+      const label = DEPLOY_TARGET_LABELS[deployTarget] ?? deployTarget
+      setFeedback({ message: `已部署 ${result.deployed} 条账号到「${label}」` })
+      setFileActionResult({
+        title: '账号已部署',
+        description: `已部署 ${result.deployed} 条账号到 ${result.output_dir}。`,
+        files: result.files,
+      })
+    }, '正在部署账号...')
+  }
+
+  function onRecycle() {
+    if (!selectedIds.length) return setFeedback({ error: '请选择要回收的数据' })
+    const label = DEPLOY_TARGET_LABELS[deployTarget] ?? deployTarget
+    if (!window.confirm(`确定从「${label}」回收选中的 ${selectedIds.length} 条账号吗？`)) return
+    run(async () => {
+      const result = await recycleMutation.mutateAsync({ ids: selectedIds, target: deployTarget })
+      setFeedback({ message: `已回收 ${result.recycled} 个凭证文件` })
+      setFileActionResult({
+        title: '账号已回收',
+        description: `已从 ${result.output_dir} 回收 ${result.recycled} 个凭证文件。`,
+        files: result.files,
+      })
+    }, '正在回收账号...')
+  }
+
+  async function onRefreshTokens() {
+    if (refreshing) return
+    const pool = records.filter((record) => selectedIds.includes(record.id) && recordRefreshToken(record.data))
+    if (!pool.length) return setFeedback({ error: '请勾选要刷新令牌的记录（需要 refresh_token）' })
+    setRefreshing(true)
+    let ok = 0
+    let failed = 0
+    for (let i = 0; i < pool.length; i++) {
+      const record = pool[i]
+      setFeedback({ message: `正在刷新令牌 ${i + 1}/${pool.length}：${recordEmail(record.data) || `#${record.id}`}` })
+      try {
+        const result = await refreshTokenMutation.mutateAsync(record.id)
+        if (result.ok) ok += 1
+        else failed += 1
+      } catch {
+        failed += 1
+      }
+    }
+    setRefreshing(false)
+    setFeedback({ message: `令牌刷新结束：成功 ${ok}，失败 ${failed}；失败记录如为 invalid_grant 已标记需重授权` })
+    void recordsQuery.refetch()
   }
 
   function onImport(file: File | undefined) {
@@ -136,6 +209,7 @@ function DataRecordsPage() {
     if (filters.health) parts.push(`health=${encodeURIComponent(filters.health)}`)
     if (filters.authState) parts.push(`auth_state=${encodeURIComponent(filters.authState)}`)
     if (filters.batch) parts.push(`batch=${encodeURIComponent(filters.batch)}`)
+    if (filters.detected) parts.push('detected=1')
     return parts.length ? `&${parts.join('&')}` : ''
   }
 
@@ -183,6 +257,9 @@ function DataRecordsPage() {
             }}
           />
           <Button type="button" variant="outline" onClick={() => fileInput.current?.click()}>导入 JSONL</Button>
+          <Button type="button" variant="outline" asChild>
+            <Link to="/tools">登记重授权</Link>
+          </Button>
           <Button type="button" variant="outline" onClick={onExport} disabled={!selectedIds.length}>导出选中</Button>
           <Button type="button" variant="outline" onClick={() => { filters.resetPage(); void recordsQuery.refetch() }}>刷新</Button>
           <Button type="button" variant="outline" onClick={() => onStartDetection(false)} disabled={!selectedIds.length}>检测选中</Button>
@@ -240,7 +317,7 @@ function DataRecordsPage() {
             type="button"
             variant="ghost"
             size="sm"
-            onClick={() => { filters.setLifecycle(''); filters.setHealth(''); filters.setAuthState(''); filters.setBatch('') }}
+            onClick={() => { filters.setLifecycle(''); filters.setHealth(''); filters.setAuthState(''); filters.setBatch(''); filters.setDetected(false) }}
           >
             清空筛选
           </Button>
@@ -261,7 +338,22 @@ function DataRecordsPage() {
               应用状态
             </Button>
           </div>
-          <Button type="button" variant="outline" size="sm" onClick={onGenerateQuota} disabled={!selectedIds.length}>生成配额文件</Button>
+          <Button type="button" variant="outline" size="sm" onClick={onGenerateQuota} disabled={!selectedIds.length}>兼容生成</Button>
+          <div className="flex items-center gap-2">
+            <Select value={deployTarget} onValueChange={setDeployTarget}>
+              <SelectTrigger className="h-8 w-[150px]"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {Object.entries(DEPLOY_TARGET_LABELS).map(([value, label]) => (
+                  <SelectItem key={value} value={value}>{label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button type="button" variant="outline" size="sm" onClick={onDeploy} disabled={!selectedIds.length}>部署选中</Button>
+            <Button type="button" variant="outline" size="sm" onClick={onRecycle} disabled={!selectedIds.length}>回收选中</Button>
+          </div>
+          <Button type="button" variant="outline" size="sm" onClick={() => void onRefreshTokens()} disabled={!selectedIds.length || refreshing}>
+            {refreshing ? '刷新中...' : '刷新令牌'}
+          </Button>
           <Button type="button" variant="destructive" size="sm" onClick={onDeleteSelected} disabled={!selectedIds.length}>
             删除选中（{selectedIds.length}）
           </Button>
@@ -296,14 +388,29 @@ function DataRecordsPage() {
       <Dialog open={quotaResult !== null} onOpenChange={(open) => !open && setQuotaResult(null)}>
         <DialogContent className="max-w-[520px]">
           <DialogHeader>
-            <DialogTitle>配额文件已生成</DialogTitle>
+            <DialogTitle>本仓库凭证文件已生成</DialogTitle>
             <DialogDescription>
-              已生成 {quotaResult?.exported ?? 0} 条配额文件{quotaResult?.output_dir ? `到 ${quotaResult.output_dir}` : ''}。
+              已兼容生成 {quotaResult?.exported ?? 0} 条凭证文件{quotaResult?.output_dir ? `到 ${quotaResult.output_dir}` : ''}。
             </DialogDescription>
           </DialogHeader>
           {quotaResult?.files?.length ? (
             <ul className="max-h-[240px] list-disc overflow-auto pl-4 text-sm">
               {quotaResult.files.map((name) => <li key={name} className="font-mono text-xs">{name}</li>)}
+            </ul>
+          ) : null}
+        </DialogContent>
+      </Dialog>
+
+      {/* 部署 / 回收结果 */}
+      <Dialog open={fileActionResult !== null} onOpenChange={(open) => !open && setFileActionResult(null)}>
+        <DialogContent className="max-w-[520px]">
+          <DialogHeader>
+            <DialogTitle>{fileActionResult?.title}</DialogTitle>
+            <DialogDescription>{fileActionResult?.description}</DialogDescription>
+          </DialogHeader>
+          {fileActionResult?.files.length ? (
+            <ul className="max-h-[240px] list-disc overflow-auto pl-4 text-sm">
+              {fileActionResult.files.map((name) => <li key={name} className="font-mono text-xs">{name}</li>)}
             </ul>
           ) : null}
         </DialogContent>

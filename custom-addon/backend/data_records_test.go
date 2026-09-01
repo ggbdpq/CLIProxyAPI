@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -590,13 +591,468 @@ func TestGenerateQuotaFilesWritesSelectedRecordsByEmailAndOverwrites(t *testing.
 	if _, err := os.Stat(filepath.Join(wantDir, "other@example.test.json")); !os.IsNotExist(err) {
 		t.Fatalf("unselected record file should not exist, stat err=%v", err)
 	}
+	after := listDataRecordsForTest(t, h)
+	marked := 0
+	for _, record := range after.Records {
+		var row map[string]any
+		if err := json.Unmarshal(record.Data, &row); err != nil {
+			t.Fatalf("decode record: %v", err)
+		}
+		if row["email"] != "target@example.test" {
+			continue
+		}
+		marked++
+		if row["lifecycle"] != "in_use" || row["deploy_target"] != "local" || row["deployed_at"] == "" {
+			t.Fatalf("legacy generate should mark local deploy fields: %#v", row)
+		}
+	}
+	if marked != 2 {
+		t.Fatalf("marked target records = %d, want 2", marked)
+	}
+}
+
+func TestDeployDataRecordsWritesFilesAndMarksRecords(t *testing.T) {
+	tmp := t.TempDir()
+	h := New(filepath.Join(tmp, "config.yaml"), "")
+
+	records, err := parseJSONLDataRecords(bytes.NewBufferString(strings.Join([]string{
+		`{"email":"target@example.test","access_token":"token","type":"codex","id_token":"id-token","refresh_token":"refresh-token","lifecycle":"unused"}`,
+		`{"email":"target@example.test","access_token":"new-token","type":"codex","id_token":"new-id-token","refresh_token":"new-refresh-token","lifecycle":"unused"}`,
+	}, "\n")+"\n"), "accounts.jsonl")
+	if err != nil {
+		t.Fatalf("parse records: %v", err)
+	}
+	dbPath, err := h.dataRecordsDBPath()
+	if err != nil {
+		t.Fatalf("data db path: %v", err)
+	}
+	if err := runDataRecordsSQLite(dataRecordsImportRequest{Action: "import", DBPath: dbPath, Records: records}, nil); err != nil {
+		t.Fatalf("import records: %v", err)
+	}
+	listed := listDataRecordsForTest(t, h)
+	ids := []int64{listed.Records[0].ID, listed.Records[1].ID, listed.Records[1].ID}
+
+	rec := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(rec)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v0/management/data-records/deploy", bytes.NewBufferString(fmt.Sprintf(`{"ids":[%d,%d,%d],"target":"local"}`, ids[0], ids[1], ids[2])))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	h.DeployDataRecords(ctx)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("deploy status = %d, body %s", rec.Code, rec.Body.String())
+	}
+	var payload dataRecordsDeployResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode deploy response: %v", err)
+	}
+	wantDir := filepath.Join(tmp, ".cli-proxy-api")
+	if payload.Deployed != 2 || payload.OutputDir != wantDir || payload.Target != "local" {
+		t.Fatalf("deploy payload = %#v", payload)
+	}
+	if len(payload.Files) != 1 || payload.Files[0] != "target@example.test.json" {
+		t.Fatalf("files = %#v, want target file once", payload.Files)
+	}
+	data, err := os.ReadFile(filepath.Join(wantDir, "target@example.test.json"))
+	if err != nil {
+		t.Fatalf("read deployed file: %v", err)
+	}
+	var file map[string]any
+	if err := json.Unmarshal(data, &file); err != nil {
+		t.Fatalf("decode deployed file: %v", err)
+	}
+	if file["email"] != "target@example.test" || file["access_token"] == "" || file["refresh_token"] == "" {
+		t.Fatalf("deployed file = %#v", file)
+	}
+
+	after := listDataRecordsForTest(t, h)
+	for _, record := range after.Records {
+		var row map[string]any
+		if err := json.Unmarshal(record.Data, &row); err != nil {
+			t.Fatalf("decode record: %v", err)
+		}
+		if row["lifecycle"] != "in_use" || row["deploy_target"] != "local" || row["deployed_at"] == "" {
+			t.Fatalf("record deploy fields = %#v", row)
+		}
+	}
+}
+
+func TestRecycleDataRecordsDeletesFilesAndClearsDeployFields(t *testing.T) {
+	tmp := t.TempDir()
+	h := New(filepath.Join(tmp, "config.yaml"), "")
+
+	records, err := parseJSONLDataRecords(bytes.NewBufferString(`{"email":"target@example.test","access_token":"token","refresh_token":"refresh-token","lifecycle":"unused"}`+"\n"), "accounts.jsonl")
+	if err != nil {
+		t.Fatalf("parse records: %v", err)
+	}
+	dbPath, err := h.dataRecordsDBPath()
+	if err != nil {
+		t.Fatalf("data db path: %v", err)
+	}
+	if err := runDataRecordsSQLite(dataRecordsImportRequest{Action: "import", DBPath: dbPath, Records: records}, nil); err != nil {
+		t.Fatalf("import records: %v", err)
+	}
+	id := listDataRecordsForTest(t, h).Records[0].ID
+	var deployed dataRecordsDeployResponse
+	if err := runDataRecordsSQLite(dataRecordsDeployRequest{Action: "deploy", DBPath: dbPath, OutputDir: filepath.Join(tmp, ".cli-proxy-api"), Target: "local", IDs: []int64{id}}, &deployed); err != nil {
+		t.Fatalf("deploy fixture: %v", err)
+	}
+	filePath := filepath.Join(tmp, ".cli-proxy-api", "target@example.test.json")
+	if _, err := os.Stat(filePath); err != nil {
+		t.Fatalf("deployed file missing: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(rec)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v0/management/data-records/recycle", bytes.NewBufferString(fmt.Sprintf(`{"ids":[%d],"target":"local"}`, id)))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	h.RecycleDataRecords(ctx)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("recycle status = %d, body %s", rec.Code, rec.Body.String())
+	}
+	var payload dataRecordsRecycleResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode recycle response: %v", err)
+	}
+	if payload.Recycled != 1 || payload.OutputDir != filepath.Join(tmp, ".cli-proxy-api") || payload.Target != "local" {
+		t.Fatalf("recycle payload = %#v", payload)
+	}
+	if _, err := os.Stat(filePath); !os.IsNotExist(err) {
+		t.Fatalf("deployed file should be removed, stat err=%v", err)
+	}
+
+	after := listDataRecordsForTest(t, h)
+	var row map[string]any
+	if err := json.Unmarshal(after.Records[0].Data, &row); err != nil {
+		t.Fatalf("decode record: %v", err)
+	}
+	if row["lifecycle"] != "unused" {
+		t.Fatalf("lifecycle = %#v, want unused", row["lifecycle"])
+	}
+	if _, ok := row["deployed_at"]; ok {
+		t.Fatalf("deployed_at should be cleared: %#v", row)
+	}
+	if _, ok := row["deploy_target"]; ok {
+		t.Fatalf("deploy_target should be cleared: %#v", row)
+	}
+}
+
+func TestDeployDataRecordsRejectsUnknownTarget(t *testing.T) {
+	tmp := t.TempDir()
+	h := New(filepath.Join(tmp, "config.yaml"), "")
+
+	rec := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(rec)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v0/management/data-records/deploy", bytes.NewBufferString(`{"ids":[1],"target":"../elsewhere"}`))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	h.DeployDataRecords(ctx)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("deploy status = %d, want 400, body %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestConvertDataRecordsContentTXTToCPA(t *testing.T) {
+	payload, err := convertDataRecordsContent("txt", "cpa", "卡密导出\n"+`{"email":"a@example.test","access_token":"at","refresh_token":"rt","disabled":false}`+"\n", time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("convert txt to cpa: %v", err)
+	}
+	if payload.Converted != 1 || payload.Filename != "cpa-records.jsonl" {
+		t.Fatalf("payload = %#v", payload)
+	}
+	var row map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimSpace(payload.Content)), &row); err != nil {
+		t.Fatalf("decode cpa output: %v", err)
+	}
+	if row["email"] != "a@example.test" || row["access_token"] != "at" || row["refresh_token"] != "rt" || row["type"] != "codex" || row["disabled"] != false {
+		t.Fatalf("cpa row = %#v", row)
+	}
+}
+
+func TestConvertDataRecordsContentCPAToSub2API(t *testing.T) {
+	payload, err := convertDataRecordsContent("cpa", "sub2api", `{"email":"a@example.test","access_token":"at","refresh_token":"rt","id_token":"it","expired":"2026-09-30T00:00:00Z","source_batch":"batch-1"}`+"\n", time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("convert cpa to sub2api: %v", err)
+	}
+	var bundle struct {
+		ExportedAt string `json:"exported_at"`
+		Accounts   []struct {
+			Name        string         `json:"name"`
+			Platform    string         `json:"platform"`
+			Type        string         `json:"type"`
+			Credentials map[string]any `json:"credentials"`
+			Extra       map[string]any `json:"extra"`
+		} `json:"accounts"`
+	}
+	if err := json.Unmarshal([]byte(payload.Content), &bundle); err != nil {
+		t.Fatalf("decode sub2api output: %v", err)
+	}
+	if payload.Converted != 1 || payload.Filename != "sub2api-accounts.json" || bundle.ExportedAt != "2026-09-01T00:00:00Z" || len(bundle.Accounts) != 1 {
+		t.Fatalf("payload/bundle = %#v %#v", payload, bundle)
+	}
+	account := bundle.Accounts[0]
+	if account.Name != "a@example.test" || account.Platform != "openai" || account.Type != "oauth" {
+		t.Fatalf("account meta = %#v", account)
+	}
+	if account.Credentials["email"] != "a@example.test" || account.Credentials["access_token"] != "at" || account.Credentials["refresh_token"] != "rt" || account.Credentials["expires_at"] != "2026-09-30T00:00:00Z" || account.Credentials["client_id"] != defaultCodexClientID {
+		t.Fatalf("credentials = %#v", account.Credentials)
+	}
+	if account.Extra["source_batch"] != "batch-1" {
+		t.Fatalf("extra = %#v", account.Extra)
+	}
+}
+
+func TestConvertDataRecordsContentSub2APIToCPA(t *testing.T) {
+	input := `{"accounts":[{"name":"a@example.test","platform":"openai","type":"oauth","credentials":{"email":"a@example.test","access_token":"at","refresh_token":"rt","expires_at":"2026-09-30T00:00:00Z"},"extra":{"source":"sub2api"}}]}`
+	payload, err := convertDataRecordsContent("sub2api", "cpa", input, time.Now())
+	if err != nil {
+		t.Fatalf("convert sub2api to cpa: %v", err)
+	}
+	var row map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimSpace(payload.Content)), &row); err != nil {
+		t.Fatalf("decode cpa output: %v", err)
+	}
+	if row["email"] != "a@example.test" || row["access_token"] != "at" || row["refresh_token"] != "rt" || row["expired"] != "2026-09-30T00:00:00Z" || row["type"] != "codex" || row["source"] != "sub2api" {
+		t.Fatalf("cpa row = %#v", row)
+	}
+}
+
+func TestRegisterDataRecordReauthUpdatesExistingAndImportsUnmatched(t *testing.T) {
+	tmp := t.TempDir()
+	h := New(filepath.Join(tmp, "config.yaml"), "")
+	dbPath, err := h.dataRecordsDBPath()
+	if err != nil {
+		t.Fatalf("data db path: %v", err)
+	}
+	seed, err := parseJSONLDataRecords(bytes.NewBufferString(`{"email":"a@example.test","access_token":"old","refresh_token":"old-rt","quota":"57%","nextTime":"8-8","health":"token_invalid","auth_state":"needs_reauth"}`+"\n"), "seed.jsonl")
+	if err != nil {
+		t.Fatalf("parse seed: %v", err)
+	}
+	if err := runDataRecordsSQLite(dataRecordsImportRequest{Action: "import", DBPath: dbPath, Records: seed}, nil); err != nil {
+		t.Fatalf("import seed: %v", err)
+	}
+	reauth, err := parseJSONLDataRecords(bytes.NewBufferString(strings.Join([]string{
+		`{"email":"a@example.test","access_token":"new","refresh_token":"new-rt","id_token":"new-it","expired":"2026-10-01T00:00:00Z","last_refresh":"2026-09-01T00:00:00Z","reauth_at":"2026-09-01T01:00:00Z"}`,
+		`{"email":"b@example.test","access_token":"b-at","refresh_token":"b-rt","expired":"2026-10-02T00:00:00Z"}`,
+		`{"access_token":"missing-email"}`,
+		`{"email":"missing-token@example.test"}`,
+	}, "\n")+"\n"), "reauth.jsonl")
+	if err != nil {
+		t.Fatalf("parse reauth: %v", err)
+	}
+	var stats dataRecordsRegisterReauthResponse
+	if err := runDataRecordsSQLite(dataRecordsRegisterReauthRequest{Action: "register_reauth", DBPath: dbPath, Records: reauth, ImportUnmatched: true}, &stats); err != nil {
+		t.Fatalf("register reauth: %v", err)
+	}
+	if stats.Total != 4 || stats.Updated != 1 || stats.Imported != 1 || stats.Unmatched != 1 || stats.MissingEmail != 1 || stats.MissingToken != 1 || stats.Skipped != 0 {
+		t.Fatalf("reauth stats = %#v", stats)
+	}
+	listed := listDataRecordsForTest(t, h)
+	rows := map[string]map[string]any{}
+	for _, record := range listed.Records {
+		var row map[string]any
+		if err := json.Unmarshal(record.Data, &row); err != nil {
+			t.Fatalf("decode record: %v", err)
+		}
+		rows[row["email"].(string)] = row
+	}
+	updated := rows["a@example.test"]
+	if updated["access_token"] != "new" || updated["refresh_token"] != "new-rt" || updated["id_token"] != "new-it" || updated["auth_state"] != "authorized" || updated["health"] != "unknown" {
+		t.Fatalf("updated row = %#v", updated)
+	}
+	if updated["reset_expired_at"] != "2026-10-01T00:00:00Z" || updated["reauth_at"] != "2026-09-01T01:00:00Z" {
+		t.Fatalf("reauth metadata = %#v", updated)
+	}
+	if _, ok := updated["quota"]; ok {
+		t.Fatalf("quota should be cleared: %#v", updated)
+	}
+	if rows["b@example.test"]["auth_state"] != "authorized" || rows["b@example.test"]["reset_expired_at"] != "2026-10-02T00:00:00Z" {
+		t.Fatalf("imported row = %#v", rows["b@example.test"])
+	}
+}
+
+func TestRefreshDataRecordTokenRotatesTokens(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Errorf("parse form: %v", err)
+		}
+		if r.Form.Get("grant_type") != "refresh_token" || r.Form.Get("refresh_token") != "rt-old" || r.Form.Get("client_id") != defaultCodexClientID {
+			t.Errorf("unexpected refresh form: %v", r.Form)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"at-new","id_token":"it-new","refresh_token":"rt-new","expires_in":3600}`))
+	}))
+	defer srv.Close()
+	oldURL := openAITokenURL
+	openAITokenURL = srv.URL
+	defer func() { openAITokenURL = oldURL }()
+
+	tmp := t.TempDir()
+	h := New(filepath.Join(tmp, "config.yaml"), "")
+	records, err := parseJSONLDataRecords(bytes.NewBufferString(`{"email":"a@example.test","access_token":"at-old","refresh_token":"rt-old","id_token":"it-old","quota":"57.63%","nextTime":"8-8","health":"token_invalid"}`+"\n"), "accounts.jsonl")
+	if err != nil {
+		t.Fatalf("parse records: %v", err)
+	}
+	dbPath, err := h.dataRecordsDBPath()
+	if err != nil {
+		t.Fatalf("data db path: %v", err)
+	}
+	if err := runDataRecordsSQLite(dataRecordsImportRequest{Action: "import", DBPath: dbPath, Records: records}, nil); err != nil {
+		t.Fatalf("import records: %v", err)
+	}
+	id := listDataRecordsForTest(t, h).Records[0].ID
+
+	rec := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(rec)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v0/management/data-records/refresh-token", bytes.NewBufferString(fmt.Sprintf(`{"id":%d}`, id)))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	h.RefreshDataRecordToken(ctx)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("refresh status = %d, body %s", rec.Code, rec.Body.String())
+	}
+
+	after := listDataRecordsForTest(t, h)
+	raw, errMarshal := json.Marshal(after.Records[0].Data)
+	if errMarshal != nil {
+		t.Fatalf("marshal record data: %v", errMarshal)
+	}
+	var data map[string]any
+	if err := json.Unmarshal(raw, &data); err != nil {
+		t.Fatalf("decode record: %v", err)
+	}
+	if data["access_token"] != "at-new" || data["refresh_token"] != "rt-new" || data["id_token"] != "it-new" {
+		t.Fatalf("rotated tokens = %#v", data)
+	}
+	if data["expired"] == "" || data["last_refresh"] == "" || after.Records[0].TokenExp == nil {
+		t.Fatalf("expiry metadata missing: data=%#v token_exp=%v", data, after.Records[0].TokenExp)
+	}
+	if data["health"] != "unknown" {
+		t.Fatalf("health = %#v, want reset to unknown", data["health"])
+	}
+	if _, hasQuota := data["quota"]; hasQuota {
+		t.Fatalf("stale quota should be cleared: %#v", data)
+	}
+}
+
+func TestRefreshDataRecordTokenMarksNeedsReauthOnInvalidGrant(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"invalid_grant","error_description":"The refresh token is invalid or expired."}`))
+	}))
+	defer srv.Close()
+	oldURL := openAITokenURL
+	openAITokenURL = srv.URL
+	defer func() { openAITokenURL = oldURL }()
+
+	tmp := t.TempDir()
+	h := New(filepath.Join(tmp, "config.yaml"), "")
+	records, err := parseJSONLDataRecords(bytes.NewBufferString(`{"email":"dead@example.test","access_token":"at-old","refresh_token":"rt-dead"}`+"\n"), "accounts.jsonl")
+	if err != nil {
+		t.Fatalf("parse records: %v", err)
+	}
+	dbPath, err := h.dataRecordsDBPath()
+	if err != nil {
+		t.Fatalf("data db path: %v", err)
+	}
+	if err := runDataRecordsSQLite(dataRecordsImportRequest{Action: "import", DBPath: dbPath, Records: records}, nil); err != nil {
+		t.Fatalf("import records: %v", err)
+	}
+	id := listDataRecordsForTest(t, h).Records[0].ID
+
+	rec := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(rec)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v0/management/data-records/refresh-token", bytes.NewBufferString(fmt.Sprintf(`{"id":%d}`, id)))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	h.RefreshDataRecordToken(ctx)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("refresh status = %d, want 409, body %s", rec.Code, rec.Body.String())
+	}
+
+	after := listDataRecordsForTest(t, h)
+	raw, errMarshal := json.Marshal(after.Records[0].Data)
+	if errMarshal != nil {
+		t.Fatalf("marshal record data: %v", errMarshal)
+	}
+	var data map[string]any
+	if err := json.Unmarshal(raw, &data); err != nil {
+		t.Fatalf("decode record: %v", err)
+	}
+	if data["auth_state"] != "needs_reauth" || data["access_token"] != "at-old" || data["refresh_token"] != "rt-dead" {
+		t.Fatalf("record after failed refresh = %#v", data)
+	}
+}
+
+func TestUpdateTokensByEmailWritesCredentialFields(t *testing.T) {
+	tmp := t.TempDir()
+	h := New(filepath.Join(tmp, "config.yaml"), "")
+	records, err := parseJSONLDataRecords(bytes.NewBufferString(`{"email":"a@example.test","access_token":"old-at","refresh_token":"old-rt","quota":"57%","health":"token_invalid"}`+"\n"), "accounts.jsonl")
+	if err != nil {
+		t.Fatalf("parse records: %v", err)
+	}
+	dbPath, err := h.dataRecordsDBPath()
+	if err != nil {
+		t.Fatalf("data db path: %v", err)
+	}
+	if err := runDataRecordsSQLite(dataRecordsImportRequest{Action: "import", DBPath: dbPath, Records: records}, nil); err != nil {
+		t.Fatalf("import records: %v", err)
+	}
+
+	updated, err := h.UpdateTokensByEmail("A@example.test", map[string]string{
+		"access_token":  "new-at",
+		"refresh_token": "new-rt",
+		"id_token":      "new-it",
+		"expired":       "2026-09-30T18:06:00.000+08:00",
+		"last_refresh":  "2026-08-31T10:00:00.000+08:00",
+	})
+	if err != nil {
+		t.Fatalf("update tokens: %v", err)
+	}
+	if updated != 1 {
+		t.Fatalf("updated = %d, want 1", updated)
+	}
+
+	after := listDataRecordsForTest(t, h)
+	raw, errMarshal := json.Marshal(after.Records[0].Data)
+	if errMarshal != nil {
+		t.Fatalf("marshal record data: %v", errMarshal)
+	}
+	var data map[string]any
+	if err := json.Unmarshal(raw, &data); err != nil {
+		t.Fatalf("decode record: %v", err)
+	}
+	if data["access_token"] != "new-at" || data["refresh_token"] != "new-rt" || data["id_token"] != "new-it" {
+		t.Fatalf("tokens = %#v", data)
+	}
+	if data["expired"] != "2026-09-30T18:06:00.000+08:00" || data["last_refresh"] != "2026-08-31T10:00:00.000+08:00" {
+		t.Fatalf("expiry metadata = %#v", data)
+	}
+}
+
+func TestListDataRecordsReturnsTokenExpFromExpiredField(t *testing.T) {
+	tmp := t.TempDir()
+	h := New(filepath.Join(tmp, "config.yaml"), "")
+	records, err := parseJSONLDataRecords(bytes.NewBufferString(`{"email":"a@example.test","expired":"2026-08-13T00:00:00Z"}`+"\n"), "accounts.jsonl")
+	if err != nil {
+		t.Fatalf("parse records: %v", err)
+	}
+	dbPath, err := h.dataRecordsDBPath()
+	if err != nil {
+		t.Fatalf("data db path: %v", err)
+	}
+	if err := runDataRecordsSQLite(dataRecordsImportRequest{Action: "import", DBPath: dbPath, Records: records}, nil); err != nil {
+		t.Fatalf("import records: %v", err)
+	}
+	listed := listDataRecordsForTest(t, h)
+	want := time.Date(2026, 8, 13, 0, 0, 0, 0, time.UTC).Unix()
+	if listed.Records[0].TokenExp == nil || *listed.Records[0].TokenExp != want {
+		t.Fatalf("token_exp = %v, want %d", listed.Records[0].TokenExp, want)
+	}
 }
 
 type dataRecordsListPayloadForTest struct {
 	Total   int `json:"total"`
 	Records []struct {
-		ID   int64           `json:"id"`
-		Data json.RawMessage `json:"data"`
+		ID       int64           `json:"id"`
+		Data     json.RawMessage `json:"data"`
+		TokenExp *int64          `json:"token_exp,omitempty"`
 	} `json:"records"`
 }
 
@@ -634,7 +1090,7 @@ func TestListDataRecordsFiltersByThreeStatesAndBatch(t *testing.T) {
 	records, err := parseJSONLDataRecords(bytes.NewBufferString(strings.Join([]string{
 		`{"email":"a@example.test","source_batch":"01.2026-05-08-LD2605082GP10R-5件-1.03元","lifecycle":"unused","health":"ok","auth_state":"authorized"}`,
 		`{"email":"b@example.test","source_batch":"01.2026-05-08-LD2605082GP10R-5件-1.03元","lifecycle":"sold","health":"err","auth_state":"missing_mailapi_url"}`,
-		`{"email":"c@example.test","source_batch":"02.2026-05-08-LD260508O5INF3-10件-4.12元","lifecycle":"in_use","health":"depleted","auth_state":"authorized"}`,
+		`{"email":"c@example.test","source_batch":"02.2026-05-08-LD260508O5INF3-10件-4.12元","lifecycle":"in_use","health":"depleted","auth_state":"authorized","quota":"57.63%","nextTime":"8-8"}`,
 		`{"email":"d@example.test","lifecycle":"unused","health":"unknown","auth_state":"authorized"}`,
 	}, "\n")+"\n"), "accounts.jsonl")
 	if err != nil {
@@ -683,6 +1139,9 @@ func TestListDataRecordsFiltersByThreeStatesAndBatch(t *testing.T) {
 	if got := filterEmails(t, dataRecordsListRequest{Lifecycle: "unused", Health: "ok"}); len(got) != 1 || got[0] != "a@example.test" {
 		t.Fatalf("combined filter = %v", got)
 	}
+	if got := filterEmails(t, dataRecordsListRequest{Detected: true}); len(got) != 1 || got[0] != "c@example.test" {
+		t.Fatalf("detected filter = %v, want only c (has quota+nextTime)", got)
+	}
 }
 
 func TestDataRecordsStatsAction(t *testing.T) {
@@ -695,7 +1154,7 @@ func TestDataRecordsStatsAction(t *testing.T) {
 	records, err := parseJSONLDataRecords(bytes.NewBufferString(strings.Join([]string{
 		`{"email":"a@example.test","lifecycle":"unused","health":"ok","auth_state":"authorized"}`,
 		`{"email":"b@example.test","lifecycle":"sold","health":"err","auth_state":"missing_mailapi_url"}`,
-		`{"email":"c@example.test","lifecycle":"sold","health":"ok","auth_state":"authorized"}`,
+		`{"email":"c@example.test","lifecycle":"sold","health":"ok","auth_state":"authorized","quota":"57.63%","nextTime":"8-8"}`,
 	}, "\n")+"\n"), "accounts.jsonl")
 	if err != nil {
 		t.Fatalf("parse records: %v", err)
@@ -719,6 +1178,9 @@ func TestDataRecordsStatsAction(t *testing.T) {
 	}
 	if payload.AuthStates["authorized"] != 2 || payload.AuthStates["missing_mailapi_url"] != 1 {
 		t.Fatalf("auth_state stats = %#v", payload.AuthStates)
+	}
+	if payload.Detected != 1 {
+		t.Fatalf("detected stats = %d, want 1", payload.Detected)
 	}
 }
 

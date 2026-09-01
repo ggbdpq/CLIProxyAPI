@@ -20,9 +20,13 @@ $pairs = @(
 $singleSource = @(
   'custom-addon/backend/data_records.go',
   'custom-addon/backend/data_records_test.go',
+  'custom-addon/frontend/src/routes/__root.tsx',
   'custom-addon/frontend/src/routes/index.tsx',
   'custom-addon/frontend/src/routes/batches.tsx',
+  'custom-addon/frontend/src/routes/tools.tsx',
   'custom-addon/frontend/src/lib/queries.ts',
+  'custom-addon/frontend/src/lib/schemas.ts',
+  'custom-addon/frontend/src/routeTree.gen.ts',
   'custom-addon/frontend/dist/index.html'
 )
 

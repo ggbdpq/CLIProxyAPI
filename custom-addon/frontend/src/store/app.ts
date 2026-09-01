@@ -10,6 +10,7 @@ interface FiltersState {
   health: string
   authState: string
   batch: string
+  detected: boolean
   page: number
   pageSize: number
   selected: Record<string, true>
@@ -18,6 +19,7 @@ interface FiltersState {
   setHealth: (v: string) => void
   setAuthState: (v: string) => void
   setBatch: (v: string) => void
+  setDetected: (v: boolean) => void
   resetPage: () => void
   goToPage: (delta: number) => void
   toggleSelected: (id: string, checked: boolean) => void
@@ -33,6 +35,7 @@ export const useFilters = create<FiltersState>((set, get) => ({
   health: '',
   authState: '',
   batch: '',
+  detected: false,
   page: 1,
   pageSize: 50,
   selected: {},
@@ -41,6 +44,7 @@ export const useFilters = create<FiltersState>((set, get) => ({
   setHealth: (health) => set({ health, page: 1 }),
   setAuthState: (authState) => set({ authState, page: 1 }),
   setBatch: (batch) => set({ batch, page: 1 }),
+  setDetected: (detected) => set({ detected, page: 1 }),
   resetPage: () => set({ page: 1 }),
   goToPage: (delta) => set((s) => ({ page: Math.max(1, s.page + delta) })),
   toggleSelected: (id, checked) =>
