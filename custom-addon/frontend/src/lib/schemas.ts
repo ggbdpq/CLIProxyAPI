@@ -8,6 +8,7 @@ export const DataRecordSchema = z.object({
   summary: z.record(z.string(), z.unknown()).optional(),
   data: z.unknown(),
   imported_at: z.string(),
+  token_exp: z.number().optional(),
 })
 export type DataRecord = z.infer<typeof DataRecordSchema>
 
@@ -21,6 +22,7 @@ export const StatsResponseSchema = z.object({
   lifecycle: z.record(z.string(), z.number()),
   health: z.record(z.string(), z.number()),
   auth_state: z.record(z.string(), z.number()),
+  detected: z.number().optional().default(0),
 })
 export type StatsResponse = z.infer<typeof StatsResponseSchema>
 
@@ -52,6 +54,41 @@ export const GenerateQuotaResponseSchema = z.object({
   files: z.array(z.string()),
 })
 export type GenerateQuotaResult = z.infer<typeof GenerateQuotaResponseSchema>
+export const DeployResponseSchema = z.object({
+  deployed: z.number(),
+  output_dir: z.string(),
+  target: z.string().optional(),
+  files: z.array(z.string()),
+})
+export const RecycleResponseSchema = z.object({
+  recycled: z.number(),
+  output_dir: z.string(),
+  target: z.string().optional(),
+  files: z.array(z.string()),
+})
+export const RefreshTokenResponseSchema = z.object({
+  ok: z.boolean(),
+  email: z.string().optional(),
+  expires_in: z.number().optional(),
+})
+export const ConvertResponseSchema = z.object({
+  from: z.string(),
+  to: z.string(),
+  filename: z.string(),
+  converted: z.number(),
+  content: z.string(),
+})
+export type ConvertResult = z.infer<typeof ConvertResponseSchema>
+export const RegisterReauthResponseSchema = z.object({
+  total: z.number(),
+  updated: z.number(),
+  imported: z.number(),
+  unmatched: z.number(),
+  missing_email: z.number(),
+  missing_token: z.number(),
+  skipped: z.number(),
+})
+export type RegisterReauthResult = z.infer<typeof RegisterReauthResponseSchema>
 export const ImportResponseSchema = z.object({
   status: z.string(),
   imported: z.number(),
@@ -102,6 +139,12 @@ export function recordEmail(data: unknown): string {
 export function recordToken(data: unknown): string {
   if (!data || typeof data !== 'object') return ''
   const value = (data as Record<string, unknown>).access_token
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+export function recordRefreshToken(data: unknown): string {
+  if (!data || typeof data !== 'object') return ''
+  const value = (data as Record<string, unknown>).refresh_token
   return typeof value === 'string' ? value.trim() : ''
 }
 

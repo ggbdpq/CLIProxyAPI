@@ -18,10 +18,10 @@ export default defineConfig({
   },
   server: {
     port: 5173,
-    // 开发模式下代理到本机 CLIProxyAPI 实例（8317）；/management.html 供 /panel 页 iframe 使用
+    // 开发模式下代理到本机 CLIProxyAPI 实例（8318）；/management.html 供 /panel 页 iframe 使用
     proxy: {
-      '/v0': 'http://127.0.0.1:8317',
-      '/management.html': 'http://127.0.0.1:8317',
+      '/v0': 'http://127.0.0.1:8318',
+      '/management.html': 'http://127.0.0.1:8318',
     },
   },
 })

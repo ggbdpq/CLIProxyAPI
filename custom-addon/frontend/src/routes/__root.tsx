@@ -10,6 +10,7 @@ export interface RouterContext {
 const NAV_TABS = [
   { to: '/', label: '数据记录' },
   { to: '/batches', label: '批次台账' },
+  { to: '/tools', label: '工具' },
   { to: '/panel', label: '系统面板' },
 ] as const
 

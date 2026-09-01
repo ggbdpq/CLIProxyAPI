@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as BatchesRouteImport } from './routes/batches'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as PanelRouteImport } from './routes/panel'
+import { Route as ToolsRouteImport } from './routes/tools'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -34,18 +35,25 @@ const PanelRoute = PanelRouteImport.update({
   path: '/panel',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ToolsRoute = ToolsRouteImport.update({
+  id: '/tools',
+  path: '/tools',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/batches': typeof BatchesRoute
   '/login': typeof LoginRoute
   '/panel': typeof PanelRoute
+  '/tools': typeof ToolsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/batches': typeof BatchesRoute
   '/login': typeof LoginRoute
   '/panel': typeof PanelRoute
+  '/tools': typeof ToolsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -53,13 +61,14 @@ export interface FileRoutesById {
   '/batches': typeof BatchesRoute
   '/login': typeof LoginRoute
   '/panel': typeof PanelRoute
+  '/tools': typeof ToolsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/batches' | '/login' | '/panel'
+  fullPaths: '/' | '/batches' | '/login' | '/panel' | '/tools'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/batches' | '/login' | '/panel'
-  id: '__root__' | '/' | '/batches' | '/login' | '/panel'
+  to: '/' | '/batches' | '/login' | '/panel' | '/tools'
+  id: '__root__' | '/' | '/batches' | '/login' | '/panel' | '/tools'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -67,6 +76,7 @@ export interface RootRouteChildren {
   BatchesRoute: typeof BatchesRoute
   LoginRoute: typeof LoginRoute
   PanelRoute: typeof PanelRoute
+  ToolsRoute: typeof ToolsRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -99,6 +109,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PanelRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/tools': {
+      id: '/tools'
+      path: '/tools'
+      fullPath: '/tools'
+      preLoaderRoute: typeof ToolsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -107,6 +124,7 @@ const rootRouteChildren: RootRouteChildren = {
   BatchesRoute: BatchesRoute,
   LoginRoute: LoginRoute,
   PanelRoute: PanelRoute,
+  ToolsRoute: ToolsRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

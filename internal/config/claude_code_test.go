@@ -10,7 +10,7 @@ func TestParseConfigBytesClaudeCodeModelListCloaking(t *testing.T) {
 	}{
 		{
 			name: "defaults to enabled cloaking",
-			yaml: "port: 8317\n",
+			yaml: "port: 8318\n",
 			want: false,
 		},
 		{

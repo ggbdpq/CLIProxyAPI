@@ -3,10 +3,15 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiFetch } from '@/lib/api'
 import {
   BatchesResponseSchema,
+  ConvertResponseSchema,
   DeleteResponseSchema,
+  DeployResponseSchema,
   GenerateQuotaResponseSchema,
   ImportResponseSchema,
   RecordsListResponseSchema,
+  RegisterReauthResponseSchema,
+  RecycleResponseSchema,
+  RefreshTokenResponseSchema,
   StatsResponseSchema,
   UpdateResponseSchema,
   type StatsResponse,
@@ -20,7 +25,7 @@ export const queryKeys = {
 }
 
 export function useRecordsQuery() {
-  const { q, lifecycle, health, authState, batch, page, pageSize } = useFilters()
+  const { q, lifecycle, health, authState, batch, detected, page, pageSize } = useFilters()
   const params: Record<string, string | number> = {
     limit: pageSize,
     offset: (page - 1) * pageSize,
@@ -30,6 +35,7 @@ export function useRecordsQuery() {
   if (health) params.health = health
   if (authState) params.auth_state = authState
   if (batch) params.batch = batch
+  if (detected) params.detected = 1
 
   return useQuery({
     queryKey: queryKeys.records(params),
@@ -121,6 +127,75 @@ export function useGenerateQuotaMutation() {
           body: JSON.stringify({ ids }),
         }),
       ),
+  })
+}
+
+export function useDeployRecordsMutation() {
+  const invalidate = useInvalidateRecords()
+  return useMutation({
+    mutationFn: async (input: { ids: number[]; target: string }) =>
+      DeployResponseSchema.parse(
+        await apiFetch<unknown>('/v0/management/data-records/deploy', {
+          method: 'POST',
+          body: JSON.stringify(input),
+        }),
+      ),
+    onSuccess: invalidate,
+  })
+}
+
+export function useRecycleRecordsMutation() {
+  const invalidate = useInvalidateRecords()
+  return useMutation({
+    mutationFn: async (input: { ids: number[]; target: string }) =>
+      RecycleResponseSchema.parse(
+        await apiFetch<unknown>('/v0/management/data-records/recycle', {
+          method: 'POST',
+          body: JSON.stringify(input),
+        }),
+      ),
+    onSuccess: invalidate,
+  })
+}
+
+export function useRefreshTokenMutation() {
+  const invalidate = useInvalidateRecords()
+  return useMutation({
+    mutationFn: async (id: number) =>
+      RefreshTokenResponseSchema.parse(
+        await apiFetch<unknown>('/v0/management/data-records/refresh-token', {
+          method: 'POST',
+          body: JSON.stringify({ id }),
+        }),
+      ),
+    onSettled: invalidate,
+  })
+}
+
+export async function convertDataRecords(input: { from: string; to: string; content: string }) {
+  return ConvertResponseSchema.parse(
+    await apiFetch<unknown>('/v0/management/data-records/convert', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  )
+}
+
+export function useRegisterReauthMutation() {
+  const invalidate = useInvalidateRecords()
+  return useMutation({
+    mutationFn: async (input: { file: File; importUnmatched: boolean }) => {
+      const form = new FormData()
+      form.append('file', input.file)
+      const flag = input.importUnmatched ? '1' : '0'
+      return RegisterReauthResponseSchema.parse(
+        await apiFetch<unknown>(`/v0/management/data-records/register-reauth?import_unmatched=${flag}`, {
+          method: 'POST',
+          body: form,
+        }),
+      )
+    },
+    onSuccess: invalidate,
   })
 }
 
