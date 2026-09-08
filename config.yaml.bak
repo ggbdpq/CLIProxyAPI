@@ -1,0 +1,84 @@
+# ============================================================
+# CLIProxyAPI (fork) 本地运行配置
+# 参考 C:\Users\802165\CLIProxyAPI\config.yaml（8317 实例），
+# 改动：端口 8318；auth-dir 用绝对路径指向仓库内 auths/（凭据在 auths/free/）。
+# 7.2.146 起建议绝对路径：相对路径会让 .cds 冷却文件在 auth-dir 下再嵌套一层
+# .cli-proxy-api\（上游路径双重前缀问题），绝对路径时 .cds 落在认证文件旁边。
+# 与 8317 实例完全隔离，互不读写对方的认证/冷却文件。
+# ============================================================
+
+host: ''
+port: 8318
+remote-management:
+  allow-remote: false
+  # 与参考实例相同的管理密钥哈希
+  secret-key: '$2a$10$m4qYy.jt/w1l2ZiSk7jLfOxApcsioDJ8ygf8VVJ0IOfhzyYeZc3Nm'
+  disable-control-panel: false
+auth-dir: 'E:/ggbdpq/guahub/gh/fork/CLIProxyAPI/auths'
+# api-keys 未启用（与参考实例一致，免数据面鉴权）
+debug: false
+proxy-url: 'socks5://127.0.0.1:7897'
+request-retry: 3
+max-retry-credentials: 3
+# 重试轮次间等待凭据冷却的最大秒数(<=0 永不等待)；7.2.146 对齐
+max-retry-interval: 30
+# true 时全局禁用凭据/模型冷却调度；凭据级/提供方级可覆盖
+disable-cooling: false
+save-cooldown-status: true
+passthrough-headers: true
+quota-exceeded:
+  switch-project: true
+  switch-preview-model: true
+  antigravity-credits: true
+routing:
+  strategy: 'fill-first'
+  session-affinity: false
+  session-affinity-ttl: '24h'
+streaming:
+  keepalive-seconds: 15
+  bootstrap-retries: 1
+ws-auth: true
+# ---------- 7.2.132~7.2.146 新增(与 8317 实例对齐) ----------
+codex:
+  # 缓冲 Codex SSE/WebSocket 初始握手事件直至首个生成事件，超载/限流可在
+  # 响应头提交前透明切换凭据；代价是首字节延迟增大(详见 config.example.yaml)。
+  stream-bootstrap-buffering: false
+# OAuth 凭据错误分类(仅 OAuth 凭据生效；action: stop / stop-and-cooldown /
+# continue / continue-and-cooldown)。按需取消注释：
+# oauth-request-scoped-errors:
+#   codex:
+#     - status: 400
+#       match:
+#         - "context_window_exceeded"
+#       action: "stop"
+claude-header-defaults:
+  user-agent: 'claude-cli/2.1.220 (external, cli)'
+  package-version: '0.94.0'
+  runtime-version: 'v26.3.0'
+  os: 'MacOS'
+  arch: 'arm64'
+  timeout: '600'
+  timezone: 'Asia/Shanghai'
+  stabilize-device-profile: false
+codex-instructions-enabled: true
+credential-concurrency:
+  cpa-heartbeat-timeout: 3s
+  cpa-cancel-bound: 5s
+  reclaim-grace: 5s
+  cleanup-interval: 5s
+  release-flush-interval: 250ms
+  release-max-backoff: 2s
+  busy-retry-min: 250ms
+  busy-retry-max: 1s
+  max-limit: 1000000
+credential-in-flight:
+  snapshot-interval: 2s
+  stale-after: 10s
+  max-part-bytes: 262144
+  max-part-count: 64
+  max-revision-bytes: 16777216
+  max-aggregate-groups: 100000
+  max-details: 10000
+  max-string-bytes: 256
+  staging-retention: 1m
+redis-usage-queue-retention-seconds: 60
