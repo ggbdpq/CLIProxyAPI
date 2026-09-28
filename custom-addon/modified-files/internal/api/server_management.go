@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	datarecords "github.com/router-for-me/CLIProxyAPI/v7/custom-addon/backend"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/managementasset"
+	datarecords "github.com/router-for-me/CLIProxyAPI/v8/custom-addon/backend"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/managementasset"
 	log "github.com/sirupsen/logrus"
 )
 
