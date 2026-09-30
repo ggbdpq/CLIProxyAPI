@@ -16,7 +16,7 @@ server:
   host: ""
 
   # Server port
-  port: 8318
+  port: 8317
 
   # IP addresses or CIDRs of proxies allowed to supply forwarded client IP headers.
   # An empty list (the default) does not trust forwarded headers. Restart after changing this setting.
@@ -1158,7 +1158,7 @@ plugins:
 #
 # Old spellings shown for reference:
 #   host: ""                         # now server.host
-#   port: 8318                       # now server.port
+#   port: 8317                       # now server.port
 #   remote-management:               # now management
 #     allow-remote: false
 #     secret-key: ""
