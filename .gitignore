@@ -67,3 +67,8 @@ docker-compose.override.yml
 
 # Local LLM Wiki vault
 .llm-wiki
+
+# Local runtime artifacts (never commit)
+config.yaml.bak
+server.log
+data/
