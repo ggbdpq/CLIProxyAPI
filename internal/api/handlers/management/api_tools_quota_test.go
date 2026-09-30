@@ -12,9 +12,9 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	datarecords "github.com/router-for-me/CLIProxyAPI/v7/custom-addon/backend"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
-	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
+	datarecords "github.com/router-for-me/CLIProxyAPI/v8/custom-addon/backend"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
+	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 )
 
 // codexQuotaSyncFixture prepares a handler backed by a temp data-records SQLite
