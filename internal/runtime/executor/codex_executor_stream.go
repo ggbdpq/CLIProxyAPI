@@ -13,6 +13,7 @@ import (
 
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/client/grokbuild"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
+	internallogging "github.com/router-for-me/CLIProxyAPI/v8/internal/logging"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/runtime/executor/helps"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/thinking"
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
@@ -545,13 +546,18 @@ func logCodexStreamTerminationDiagnostics(ctx context.Context, readErr error, ev
 	// Structured fields, not an interpolated message: operators routing logrus to a structured or
 	// JSON sink must be able to filter, index, and aggregate every dimension; the message stays a
 	// static, human-readable summary.
-	helps.LogWithRequestID(ctx).WithFields(log.Fields{
+	fields := log.Fields{
 		"read_error":      classifyCodexSSEReadError(readErr),
 		"events":          eventCount,
 		"last_event_type": codexDiagnosticEventType(lastEventType),
 		"idle_ms":         time.Since(idleSince).Milliseconds(),
 		"total_ms":        time.Since(startedAt).Milliseconds(),
-	}).Warn("codex executor: upstream SSE stream terminated without response.completed (metadata-only diagnostics)")
+	}
+	if requestID := internallogging.CanonicalRequestUUIDv7(internallogging.GetRequestID(ctx)); requestID != "" {
+		fields["request_id"] = requestID
+		fields["request_uuid"] = requestID
+	}
+	log.WithFields(fields).Warn("codex executor: upstream SSE stream terminated without response.completed (metadata-only diagnostics)")
 }
 
 // codexDiagnosticEventType renders an unset event type as a dash so the diagnostic line never

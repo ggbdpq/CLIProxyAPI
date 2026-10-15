@@ -59,7 +59,7 @@ var logFieldOrder = []string{
 	"credential", "auth_id", "auth_index", "connection", "proxy_scheme", "remote_transport",
 	"operation", "upstream_host", "reused", "was_idle", "idle_time",
 	"media_session_id", "call_id", "peer", "state", "reason",
-	"read_error", "events", "last_event_type", "idle_ms", "total_ms",
+	"request_uuid", "read_error", "events", "last_event_type", "idle_ms", "total_ms",
 }
 
 var quotedLogFields = map[string]struct{}{
@@ -118,6 +118,12 @@ func (m *LogFormatter) Format(entry *log.Entry) ([]byte, error) {
 		var fields []string
 		for _, k := range logFieldOrder {
 			if v, ok := entry.Data[k]; ok {
+				if k == "request_uuid" {
+					requestID, isString := v.(string)
+					if !isString || CanonicalRequestUUIDv7(requestID) == "" {
+						continue
+					}
+				}
 				fields = append(fields, fmt.Sprintf("%s=%s", k, formatLogFieldValue(k, v)))
 			}
 		}

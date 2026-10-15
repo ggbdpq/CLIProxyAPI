@@ -47,6 +47,7 @@ func TestLogFormatterPrintsCodexTerminationDiagnosticFields(t *testing.T) {
 	entry.Time = time.Date(2026, 10, 10, 12, 0, 0, 0, time.Local)
 	entry.Level = log.WarnLevel
 	entry.Message = "codex executor: upstream SSE stream terminated without response.completed (metadata-only diagnostics)"
+	entry.Data["request_uuid"] = "018f3a5b-1234-7abc-8ef0-12345678abcd"
 	entry.Data["read_error"] = "http2-stream-error"
 	entry.Data["events"] = 42
 	entry.Data["last_event_type"] = "response.output_text.delta"
@@ -60,6 +61,7 @@ func TestLogFormatterPrintsCodexTerminationDiagnosticFields(t *testing.T) {
 
 	line := string(formatted)
 	for _, want := range []string{
+		"request_uuid=018f3a5b-1234-7abc-8ef0-12345678abcd",
 		"read_error=http2-stream-error",
 		"events=42",
 		"last_event_type=response.output_text.delta",
@@ -68,6 +70,27 @@ func TestLogFormatterPrintsCodexTerminationDiagnosticFields(t *testing.T) {
 	} {
 		if !strings.Contains(line, want) {
 			t.Fatalf("formatted line %q missing diagnostic field %q", line, want)
+		}
+	}
+}
+
+func TestLogFormatterRejectsUntrustedRequestUUID(t *testing.T) {
+	for _, value := range []any{
+		"prompt=private-input\nrequest_uuid=018f3a5b-1234-7abc-8ef0-12345678abcd",
+		"20261015120000-auth-index-018f3a5b-1234-7abc-8ef0-12345678abcd",
+		struct{ Text string }{Text: "private-input"},
+	} {
+		entry := log.NewEntry(log.New())
+		entry.Level = log.WarnLevel
+		entry.Message = "codex executor: upstream SSE stream terminated without response.completed (metadata-only diagnostics)"
+		entry.Data["request_uuid"] = value
+		entry.Data["untrusted_body"] = "private-input"
+		formatted, errFormat := (&LogFormatter{}).Format(entry)
+		if errFormat != nil {
+			t.Fatalf("Format() error = %v", errFormat)
+		}
+		if line := string(formatted); strings.Contains(line, "request_uuid=") || strings.Contains(line, "private-input") || strings.Contains(line, "untrusted_body") {
+			t.Fatalf("formatted line contains untrusted field: %q", line)
 		}
 	}
 }

@@ -3,13 +3,16 @@ package executor
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
+	internallogging "github.com/router-for-me/CLIProxyAPI/v8/internal/logging"
 	_ "github.com/router-for-me/CLIProxyAPI/v8/internal/translator"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/net/http2"
@@ -86,7 +89,8 @@ func TestCodexExecutor_IncompleteStreamLogsTerminationDiagnostics(t *testing.T) 
 	capture := attachCodexLogCapture(t)
 
 	req, opts := codexTestRequest()
-	result, err := NewCodexExecutor(&config.Config{}).ExecuteStream(context.Background(), codexTestAuth(server.URL), req, opts)
+	const requestID = "018f3a5b-1234-7abc-8ef0-12345678abcd"
+	result, err := NewCodexExecutor(&config.Config{}).ExecuteStream(internallogging.WithRequestID(context.Background(), requestID), codexTestAuth(server.URL), req, opts)
 	if err != nil {
 		t.Fatalf("stream start must not fail synchronously: %v", err)
 	}
@@ -105,6 +109,12 @@ func TestCodexExecutor_IncompleteStreamLogsTerminationDiagnostics(t *testing.T) 
 	if diagnostic == nil {
 		t.Fatalf("expected a metadata-only termination diagnostic on the operator log, got: %v", capture.messages())
 	}
+	if got := diagnostic.Data["request_uuid"]; got != requestID {
+		t.Fatalf("structured field request_uuid = %v, want full server request UUID %q", got, requestID)
+	}
+	if got := internallogging.FormatCPATraceID(time.Now(), "private-auth-index", requestID); !strings.HasSuffix(got, "-"+requestID) {
+		t.Fatalf("trace header %q and warning request UUID %q do not correlate", got, requestID)
+	}
 	if got := diagnostic.Data["read_error"]; got != "clean-eof" {
 		t.Fatalf("structured field read_error = %v, want clean-eof", got)
 	}
@@ -119,6 +129,57 @@ func TestCodexExecutor_IncompleteStreamLogsTerminationDiagnostics(t *testing.T) 
 	}
 	if got := diagnostic.Data["total_ms"]; got == nil {
 		t.Fatalf("structured field total_ms missing: %v", diagnostic.Data)
+	}
+}
+
+func TestCodexTerminationDiagnosticsNeverLogRawReadErrorOrBody(t *testing.T) {
+	capture := attachCodexLogCapture(t)
+	const requestID = "018f3a5b-1234-7abc-8ef0-12345678abcd"
+	ctx := internallogging.WithRequestID(context.Background(), requestID)
+	logCodexStreamTerminationDiagnostics(ctx,
+		errors.New("read tcp 10.1.2.3:52344: private-prompt-and-sse-body"),
+		2, "private-prompt-and-sse-body", time.Now(), time.Now())
+	diagnostic := capture.codexTerminationDiagnosticEntry()
+	if diagnostic == nil {
+		t.Fatal("missing termination diagnostic")
+	}
+	if diagnostic.Data["read_error"] != "read-error" || diagnostic.Data["last_event_type"] != "unknown" {
+		t.Fatalf("unexpected sanitized fields: %v", diagnostic.Data)
+	}
+	for _, forbidden := range []string{"private-prompt-and-sse-body", "10.1.2.3"} {
+		if strings.Contains(diagnostic.Message, forbidden) {
+			t.Fatalf("diagnostic message contains private data %q: %q", forbidden, diagnostic.Message)
+		}
+		for key, value := range diagnostic.Data {
+			if strings.Contains(key, forbidden) || strings.Contains(fmt.Sprint(value), forbidden) {
+				t.Fatalf("diagnostic field %q contains private data %q: %v", key, forbidden, value)
+			}
+		}
+	}
+}
+
+func TestCodexTerminationDiagnosticsRejectsCompositeTraceID(t *testing.T) {
+	capture := attachCodexLogCapture(t)
+	const requestID = "018f3a5b-1234-7abc-8ef0-12345678abcd"
+	traceID := internallogging.FormatCPATraceID(time.Now(), "private-auth-index", requestID)
+	ctx := internallogging.WithRequestID(context.Background(), traceID)
+	logCodexStreamTerminationDiagnostics(ctx, nil, 0, "", time.Time{}, time.Now())
+	diagnostic := capture.codexTerminationDiagnosticEntry()
+	if diagnostic == nil {
+		t.Fatal("missing termination diagnostic")
+	}
+	if _, present := diagnostic.Data["request_uuid"]; present {
+		t.Fatalf("composite trace ID entered request_uuid: %v", diagnostic.Data)
+	}
+	if _, present := diagnostic.Data["request_id"]; present {
+		t.Fatalf("composite trace ID entered request_id: %v", diagnostic.Data)
+	}
+	formatted, errFormat := (&internallogging.LogFormatter{}).Format(diagnostic)
+	if errFormat != nil {
+		t.Fatalf("format diagnostic: %v", errFormat)
+	}
+	if strings.Contains(string(formatted), traceID) || strings.Contains(string(formatted), "private-auth-index") {
+		t.Fatalf("composite trace ID appeared in operator log: %q", formatted)
 	}
 }
 
