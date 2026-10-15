@@ -25,6 +25,27 @@ func TestGenerateRequestID_ValidUUIDv7(t *testing.T) {
 	}
 }
 
+func TestCanonicalRequestUUIDv7(t *testing.T) {
+	const valid = "018f3a5b-1234-7abc-8ef0-12345678abcd"
+	for _, tc := range []struct {
+		name, input, want string
+	}{
+		{"canonical v7", valid, valid},
+		{"empty", "", ""},
+		{"v4", "018f3a5b-1234-4abc-8ef0-12345678abcd", ""},
+		{"wrong variant", "018f3a5b-1234-7abc-def0-12345678abcd", ""},
+		{"uppercase", "018F3A5B-1234-7ABC-8EF0-12345678ABCD", ""},
+		{"header includes auth index", "20261015120000-auth-index-" + valid, ""},
+		{"untrusted text", "prompt=private input\nrequest_uuid=" + valid, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := CanonicalRequestUUIDv7(tc.input); got != tc.want {
+				t.Fatalf("CanonicalRequestUUIDv7(%q) = %q, want %q", tc.input, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestGenerateRequestID_Concurrency(t *testing.T) {
 	const total = 1000
 	var wg sync.WaitGroup
